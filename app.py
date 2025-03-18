@@ -8,7 +8,7 @@ import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # Import the TikTok live scraper
-from lib.scrapping.tiktok_live import (
+from tiktok_live import (
     TikTokLiveClient,
     ConnectEvent,
     CommentEvent,
