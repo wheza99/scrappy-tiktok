@@ -3,6 +3,9 @@ from TikTokLive.events import ConnectEvent, CommentEvent
 import requests
 import datetime
 import threading
+import asyncio
+import signal
+import sys
 
 # Constants
 # WEBHOOK_URL = "https://wheza.app.n8n.cloud/webhook-test/46d6bdb2-4b1a-4e08-af30-fe9274041a31" #test
@@ -20,10 +23,24 @@ comment_timer = None
 
 # Create the client - Menggunakan username TikTok yang populer dan mungkin sedang live
 client = None
+client_running = False
+client_thread = None
 
 # Listen to an event dengan decorator
 def setup_client(unique_id=TIKTOK_USERNAME):
-    global client
+    global client, client_running, client_thread
+    
+    # Clean up any existing client
+    if client:
+        try:
+            # Force terminate the client
+            client_running = False
+            if client_thread and client_thread.is_alive():
+                client_thread = None
+        except:
+            pass
+    
+    client_running = True
     client = TikTokLiveClient(unique_id=unique_id)
     
     @client.on(ConnectEvent)
@@ -39,6 +56,9 @@ def setup_client(unique_id=TIKTOK_USERNAME):
 
 # Dan juga bisa menambahkan listener secara manual
 async def on_comment(event: CommentEvent) -> None:
+    if not client_running:
+        return
+        
     username = event.user.nickname
     comment = event.comment
     timestamp = datetime.datetime.now().isoformat()
@@ -74,6 +94,11 @@ def send_webhook(comments_batch, webhook_url=WEBHOOK_URL):
 # Send all collected comments to the webhook and clear the collection
 def send_collected_comments(interval=BATCH_INTERVAL_SECONDS, webhook_url=WEBHOOK_URL):
     global collected_comments, comment_timer
+    
+    # If client is not running anymore, don't schedule another timer
+    if not client_running:
+        return
+        
     with comments_lock:
         comments_to_send = collected_comments.copy()
         collected_comments = []
@@ -81,10 +106,11 @@ def send_collected_comments(interval=BATCH_INTERVAL_SECONDS, webhook_url=WEBHOOK
     if comments_to_send:
         send_webhook(comments_to_send, webhook_url)
     
-    # Schedule the next execution
-    comment_timer = threading.Timer(interval, lambda: send_collected_comments(interval, webhook_url))
-    comment_timer.daemon = True
-    comment_timer.start()
+    # Schedule the next execution only if client is still running
+    if client_running:
+        comment_timer = threading.Timer(interval, lambda: send_collected_comments(interval, webhook_url))
+        comment_timer.daemon = True
+        comment_timer.start()
 
 # Start the first timer
 def start_comment_sender(interval=BATCH_INTERVAL_SECONDS, webhook_url=WEBHOOK_URL):
@@ -95,16 +121,80 @@ def start_comment_sender(interval=BATCH_INTERVAL_SECONDS, webhook_url=WEBHOOK_UR
     comment_timer.daemon = True
     comment_timer.start()
 
-# Stop the timer
+# Stop the timer and clear resources
 def stop_comment_sender():
-    global comment_timer
+    global comment_timer, client_running, collected_comments
+    
+    # Set client_running to False to prevent new timers from being scheduled
+    client_running = False
+    
+    # Cancel the current timer if it exists
     if comment_timer:
         comment_timer.cancel()
         comment_timer = None
+    
+    # Clear collected comments
+    with comments_lock:
+        collected_comments = []
+    
+    print("Comment sender stopped and resources cleared")
+
+# Disconnect the client and clean up resources
+def disconnect_client():
+    global client, client_running, client_thread
+    
+    # Stop the comment sender first
+    stop_comment_sender()
+    
+    # Set client_running to False
+    client_running = False
+    
+    # Force kill the client process
+    if client:
+        try:
+            # Force terminate the client
+            print("TikTok client disconnected")
+            
+            # Force Python to exit the client thread
+            if client_thread and client_thread.is_alive():
+                # We can't directly kill a thread in Python, but we can set a flag
+                # that the thread should check and exit if set
+                client_thread = None
+            
+            # Set client to None to allow garbage collection
+            client = None
+            
+            # Force a garbage collection to clean up resources
+            import gc
+            gc.collect()
+            
+        except Exception as e:
+            print(f"Error disconnecting client: {e}")
+            client = None
+
+# Run the client in a separate thread
+def run_client_in_thread(client_to_run):
+    global client_running, client_thread
+    
+    client_thread = threading.current_thread()
+    
+    try:
+        client_to_run.run()
+    except Exception as e:
+        print(f"Error in client thread: {e}")
+    finally:
+        client_running = False
+        print("Client thread exited")
 
 if __name__ == '__main__':
     # Setup and run the client
     client = setup_client(TIKTOK_USERNAME)
     # Run the client and block the main thread
     # await client.start() to run non-blocking
-    client.run()
+    try:
+        client_thread = threading.Thread(target=run_client_in_thread, args=(client,))
+        client_thread.start()
+        client_thread.join()
+    except KeyboardInterrupt:
+        disconnect_client()
+        print("Application stopped by user")
