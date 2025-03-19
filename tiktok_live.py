@@ -11,7 +11,7 @@ import sys
 # WEBHOOK_URL = "https://wheza.app.n8n.cloud/webhook-test/46d6bdb2-4b1a-4e08-af30-fe9274041a31" #test
 WEBHOOK_URL = "https://wheza.app.n8n.cloud/webhook/46d6bdb2-4b1a-4e08-af30-fe9274041a31" #production
 BATCH_INTERVAL_SECONDS = 30.0
-TIKTOK_USERNAME = "@coach.qiu"
+TIKTOK_USERNAME = "@bnb.shop"
 
 # Variable to store collected comments
 collected_comments = []
