@@ -79,6 +79,7 @@ def send_webhook(comments_batch, webhook_url=WEBHOOK_URL):
         
     try:
         payload = {
+            "username": TIKTOK_USERNAME,
             "comments": comments_batch
         }
         response = requests.post(webhook_url, json=payload)
